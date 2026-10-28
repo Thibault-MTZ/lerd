@@ -93,7 +93,7 @@ func (p *Plugin) Features() []Feature {
 		for _, pg := range []struct {
 			kind string
 			page *UIPage
-		}{{"page", p.UI.Page}, {"site_tab", p.UI.SiteTab}, {"overview_card", p.UI.OverviewCard}} {
+		}{{"page", p.UI.Page}, {"site_tab", p.UI.SiteTab}, {"overview_card", p.UI.OverviewCard}, {"share_action", p.UI.ShareAction}} {
 			if pg.page != nil {
 				add(pg.kind, pg.page.Title, "")
 			}

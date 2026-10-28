@@ -76,6 +76,7 @@
     hook: m.system_plugins_feature_hook,
     page: m.system_plugins_feature_page,
     site_tab: m.system_plugins_feature_site_tab,
+    share_action: m.publicShare_title,
     overview_card: m.system_plugins_feature_overview_card,
     page_script: m.system_plugins_feature_page_script,
     provides: m.system_plugins_feature_provides,

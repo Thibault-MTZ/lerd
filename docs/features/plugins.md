@@ -292,6 +292,16 @@ It is delivered like every other notification, to the dashboard, Web Push or the
 
 ## Dashboard pages and tabs
 
+An optional `ui.share_action: {title: Access rules, entry: ui/site.html}` adds an
+action to the native public-share menu. It appears only while the selected site
+or worktree has an active public reverse-proxy share, never for LAN sharing or an
+external tunnel. It opens the existing sandboxed plugin frame in a dashboard
+modal, with `site`, `domain`, `branch`, `intent=access` and `lang` as query
+parameters. `branch` is the native normalized worktree identifier, or empty for
+the parent site. A plugin may reuse an existing page and inspect
+`lerd.context.intent` to open its access controls directly. Opening the action
+does not change publication state or grant additional API authority.
+
 A rail page opens in the dashboard's panel, the same place service dashboards open, under its own rule on the rail below lerd's launchers; a site tab sits beside Overview, Logs and the rest, and receives `site`, `domain` and `branch` as query parameters. An Overview card is a section of its own on a site's Overview, below the services, and receives the same parameters. It is off on every site until switched on from the plugin icon in the site's header or with `lerd plugin card <name> on` in the project, and it grows to the height of its page, which the boilerplate's `ui/lerd.js` reports for it.
 
 Plugin pages run in a sandboxed frame with no access to the dashboard, so a plugin page can never act with the dashboard's standing. It reaches its own API endpoints through the bridge in the boilerplate's `ui/lerd.js`:

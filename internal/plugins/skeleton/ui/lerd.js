@@ -25,6 +25,7 @@ window.lerd = (() => {
       site: params.get('site') || '',
       domain: params.get('domain') || '',
       branch: params.get('branch') || '',
+      intent: params.get('intent') || '',
       // The dashboard's language, like en, ro or zh-TW, for a page that
       // translates itself.
       lang: params.get('lang') || 'en'

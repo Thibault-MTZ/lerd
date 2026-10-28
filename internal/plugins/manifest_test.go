@@ -61,6 +61,8 @@ func TestReadManifest_Refusals(t *testing.T) {
 		{"unknown method", "p", "api_version: 1\nname: p\napi:\n  - {path: x, methods: [BREW], run: bin/run}\n", "BREW"},
 		{"api path escapes", "p", "api_version: 1\nname: p\napi:\n  - {path: ../x, run: bin/run}\n", "../x"},
 		{"ui entry outside ui/", "p", "api_version: 1\nname: p\nui:\n  page: {title: P, entry: bin/run}\n", "bin/run"},
+		{"share action outside ui/", "p", "api_version: 1\nname: p\nui:\n  share_action: {title: Access, entry: bin/run}\n", "bin/run"},
+		{"share action without title", "p", "api_version: 1\nname: p\nui:\n  share_action: {entry: ui/access.html}\n", "title"},
 		{"overview card outside ui/", "p", "api_version: 1\nname: p\nui:\n  overview_card: {title: P, entry: bin/run}\n", "bin/run"},
 		{"overview card without a title", "p", "api_version: 1\nname: p\nui:\n  overview_card: {entry: ui/card.html}\n", "title"},
 		{"page script outside ui/", "p", "api_version: 1\nname: p\nui:\n  page_script: bin/run\n", "bin/run"},

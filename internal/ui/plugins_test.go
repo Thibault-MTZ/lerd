@@ -37,6 +37,7 @@ api:
 ui:
   page: {title: Echo, icon: ui/icon.svg, entry: ui/index.html}
   site_tab: {title: Echo, entry: ui/site.html}
+  share_action: {title: Access rules, entry: ui/site.html}
 `,
 		"bin/say":       "#!/bin/sh\nin=$(cat)\n[ \"$LERD_QUERY\" = \"fail=1\" ] && { echo nope >&2; exit 1; }\nprintf '{\"method\":\"%s\",\"query\":\"%s\",\"body\":\"%s\",\"surface\":\"%s\"}' \"$LERD_METHOD\" \"$LERD_QUERY\" \"$in\" \"$LERD_SURFACE\"\n",
 		"ui/index.html": "<p>echo</p>",
@@ -593,6 +594,9 @@ func TestPluginsList_DescribesUI(t *testing.T) {
 	}
 	if p.SiteTab == nil || p.SiteTab.URL != "/plugins/echo/ui/site.html" {
 		t.Errorf("site tab = %+v", p.SiteTab)
+	}
+	if p.ShareAction == nil || p.ShareAction.Title != "Access rules" || p.ShareAction.URL != "/plugins/echo/ui/site.html" {
+		t.Errorf("share action = %+v", p.ShareAction)
 	}
 }
 

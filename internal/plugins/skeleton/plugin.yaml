@@ -67,6 +67,9 @@ ui:
     title: Hello
     icon: ui/icon.svg
     entry: ui/index.html
+  # Optional modal action, shown only for an active native public share.
+  # Context: site, domain, branch (native slug), intent=access, lang.
+  # share_action: {title: Access rules, entry: ui/site.html}
   site_tab:
     title: Hello
     entry: ui/site.html

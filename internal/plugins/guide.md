@@ -51,6 +51,8 @@ requires: [jq]              # commands the scripts call beyond their interpreter
 ui:                         # only ui/ is served
   page: {title: Notes, icon: ui/icon.svg, entry: ui/index.html}
   site_tab: {title: Notes, entry: ui/site.html}
+  # Optional action on an active native public share, opened in a modal.
+  # share_action: {title: Access rules, entry: ui/site.html}
   overview_card: {title: Notes, entry: ui/card.html}
   page_script: ui/page.js
 ```

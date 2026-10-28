@@ -102,6 +102,8 @@ type Endpoint struct {
 type UI struct {
 	Page    *UIPage `yaml:"page,omitempty" json:"page,omitempty"`
 	SiteTab *UIPage `yaml:"site_tab,omitempty" json:"site_tab,omitempty"`
+	// ShareAction opens in the native public-share menu for its active target.
+	ShareAction *UIPage `yaml:"share_action,omitempty" json:"share_action,omitempty"`
 	// OverviewCard is drawn on the Overview of the sites the user switched the
 	// plugin's card on for.
 	OverviewCard *UIPage `yaml:"overview_card,omitempty" json:"overview_card,omitempty"`
@@ -216,7 +218,7 @@ func (p *Plugin) validate() error {
 		return err
 	}
 	if p.UI != nil {
-		for _, page := range []*UIPage{p.UI.Page, p.UI.SiteTab, p.UI.OverviewCard} {
+		for _, page := range []*UIPage{p.UI.Page, p.UI.SiteTab, p.UI.OverviewCard, p.UI.ShareAction} {
 			if err := p.validatePage(page); err != nil {
 				return err
 			}
@@ -328,6 +330,7 @@ func (p *Plugin) Surfaces() []string {
 	add("api", len(p.API) > 0)
 	add("page", p.UI != nil && p.UI.Page != nil)
 	add("site_tab", p.UI != nil && p.UI.SiteTab != nil)
+	add("share_action", p.UI != nil && p.UI.ShareAction != nil)
 	add("overview_card", p.UI != nil && p.UI.OverviewCard != nil)
 	add("page_script", p.UI != nil && p.UI.PageScript != "")
 	add("provides", len(p.Provides) > 0)

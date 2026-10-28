@@ -27,6 +27,7 @@ type pluginInfo struct {
 	Description string      `json:"description,omitempty"`
 	Page        *pluginPage `json:"page,omitempty"`
 	SiteTab     *pluginPage `json:"site_tab,omitempty"`
+	ShareAction *pluginPage `json:"share_action,omitempty"`
 	// OverviewCard is listed for every site; a site's switches say where it shows.
 	OverviewCard *pluginPage `json:"overview_card,omitempty"`
 	// Update says the catalog approved a newer commit, for the rail's badge.
@@ -59,6 +60,7 @@ func handlePluginsList(w http.ResponseWriter, _ *http.Request) {
 		if p.UI != nil {
 			info.Page = pluginPageInfo(p.Name, p.UI.Page)
 			info.SiteTab = pluginPageInfo(p.Name, p.UI.SiteTab)
+			info.ShareAction = pluginPageInfo(p.Name, p.UI.ShareAction)
 			info.OverviewCard = pluginPageInfo(p.Name, p.UI.OverviewCard)
 		}
 		out = append(out, info)

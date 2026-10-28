@@ -10,6 +10,9 @@
     stopTunnel
   } from '$stores/sites';
   import Icon from '$components/Icon.svelte';
+  import Modal from '$components/Modal.svelte';
+  import PluginFrame from '$components/PluginFrame.svelte';
+  import { shareActionPlugins, type PluginInfo } from '$stores/plugins';
   import ShareDomainModal from './ShareDomainModal.svelte';
   import ShareTokenModal from './ShareTokenModal.svelte';
   import ShareToolCog from './ShareToolCog.svelte';
@@ -53,6 +56,19 @@
   let tunnelError = $state('');
   let errorTool = $state('');
   let cancelRequested = false;
+  let shareAction: PluginInfo | null = $state(null);
+  let shareActionContext = $state<Record<string, string>>({});
+
+  function openShareAction(plugin: PluginInfo) {
+    if (!publicShared || !plugin.share_action) return;
+    shareActionContext = { site: site.name, domain: activeWorktreeBranch ? activeWorktree?.domain ?? '' : site.domain, branch: activeWorktreeBranch, intent: 'access' };
+    shareAction = plugin;
+    closeNow();
+  }
+
+  $effect(() => {
+    if (shareAction && (!publicShared || shareActionContext.site !== site.name || shareActionContext.branch !== activeWorktreeBranch)) shareAction = null;
+  });
 
   // A worktree is served on its own subdomain and tunnels it separately, so
   // the section reads and acts on the active branch's tunnel, not the site's.
@@ -437,6 +453,15 @@
         </div>
       {/if}
 
+      {#if publicShared}
+        {#each $shareActionPlugins as plugin (plugin.name)}
+          <button type="button" role="menuitem" class="{itemClass} {itemIdle}" onclick={() => openShareAction(plugin)}>
+            <Icon name="system" class="w-3.5 h-3.5 shrink-0" />
+            <span>{plugin.share_action?.title}</span>
+          </button>
+        {/each}
+      {/if}
+
       <div class="my-1 border-t border-gray-100 dark:border-lerd-border"></div>
       <div class="px-3 pt-0.5 pb-0.5 text-[9px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
         {m.share_publicTunnel()}
@@ -602,3 +627,11 @@
   onclose={() => (baseModal = false)}
   onsubmit={saveBase}
 />
+
+{#if shareAction?.share_action}
+  <Modal open={true} title={shareAction.share_action.title} size="xl" tall={true} onclose={() => (shareAction = null)}>
+    <div class="flex flex-1 min-h-0">
+      <PluginFrame plugin={shareAction.name} url={shareAction.share_action.url} title={shareAction.share_action.title} context={shareActionContext} />
+    </div>
+  </Modal>
+{/if}

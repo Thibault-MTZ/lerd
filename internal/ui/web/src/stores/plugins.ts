@@ -13,6 +13,7 @@ export interface PluginInfo {
   description?: string;
   page?: PluginPage;
   site_tab?: PluginPage;
+  share_action?: PluginPage;
   overview_card?: PluginPage;
   // The catalog approved a newer commit than the one installed.
   update?: boolean;
@@ -26,6 +27,7 @@ export const plugins = writable<PluginInfo[]>([]);
 // Plugins that draw a page on the rail, and those that add a tab to every site.
 export const railPlugins = derived(plugins, ($p) => $p.filter((p) => p.page));
 export const siteTabPlugins = derived(plugins, ($p) => $p.filter((p) => p.site_tab));
+export const shareActionPlugins = derived(plugins, ($p) => $p.filter((p) => p.share_action));
 // How many installed plugins have a newer approved commit, for the rail's badge.
 export const pluginUpdates = derived(plugins, ($p) => $p.filter((p) => p.update).length);
 

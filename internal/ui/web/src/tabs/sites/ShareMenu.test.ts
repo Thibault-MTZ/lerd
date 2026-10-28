@@ -2,6 +2,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/svelte';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import Harness from './ShareMenu.test.svelte';
 import type { Site } from '$stores/sites';
+import { plugins } from '$stores/plugins';
 
 const site = {
   domain: 'app.test',
@@ -48,7 +49,37 @@ async function openMenu(container: HTMLElement) {
   return screen.getByTestId('share-menu');
 }
 
-beforeEach(() => mockFetch());
+beforeEach(() => { plugins.set([]); mockFetch(); });
+
+describe('ShareMenu plugin action', () => {
+  const action = { name: 'sample-access', share_action: { title: 'Access rules', url: '/plugins/sample-access/ui/access.html' } };
+  it('opens the sandboxed plugin with the public site context', async () => {
+    plugins.set([action]);
+    const { container } = render(Harness, { props: { site: { ...site, name: 'demo', public_shared: true } as Site } });
+    await openMenu(container);
+    await fireEvent.click(screen.getByRole('menuitem', { name: 'Access rules' }));
+    const frame = screen.getByTitle('Access rules');
+    const src = new URL(frame.getAttribute('src')!, window.location.href);
+    expect(src.pathname).toBe('/plugins/sample-access/ui/access.html');
+    expect(Object.fromEntries(src.searchParams)).toMatchObject({ site: 'demo', domain: 'app.test', branch: '', intent: 'access' });
+    expect(frame.getAttribute('sandbox')).not.toContain('allow-same-origin');
+    expect(fetchCalls.some((u) => u.includes('public:share'))).toBe(false);
+  });
+  it('keeps the sanitized worktree identity and its own domain', async () => {
+    plugins.set([action]);
+    const { container } = render(Harness, { props: { site: { ...withWorktree({ public_shared: true, git_branch: 'feature/raw' }), name: 'demo' } as Site, activeWorktreeBranch: 'feat' } });
+    await openMenu(container);
+    await fireEvent.click(screen.getByRole('menuitem', { name: 'Access rules' }));
+    const src = new URL(screen.getByTitle('Access rules').getAttribute('src')!, window.location.href);
+    expect(Object.fromEntries(src.searchParams)).toMatchObject({ site: 'demo', domain: 'feat.app.test', branch: 'feat', intent: 'access' });
+  });
+  it('does not offer actions for LAN, tunnel, or a stopped public share', async () => {
+    plugins.set([action]);
+    const { container } = render(Harness, { props: { site: { ...site, public_shared: true, tunnel_url: 'https://tunnel.example', worktrees: [{ branch: 'feat', domain: 'feat.app.test', lan_port: 9100 }] } as Site, activeWorktreeBranch: 'feat', lanOn: true } });
+    await openMenu(container);
+    expect(screen.queryByRole('menuitem', { name: 'Access rules' })).not.toBeInTheDocument();
+  });
+});
 
 describe('ShareMenu', () => {
   it('keeps the click path a plain LAN toggle', async () => {
