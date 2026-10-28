@@ -142,6 +142,9 @@ func Start(currentVersion string) error {
 
 	// Restart any LAN share proxies that were active before this process started.
 	go cli.RestoreLANShareProxies()
+	if err := cli.StartPublicIngress(); err != nil {
+		return err
+	}
 	go cli.RestorePublicShareProxies()
 
 	// A public tunnel must not outlive the process that owns it. Stop them on
@@ -240,6 +243,7 @@ func Start(currentVersion string) error {
 	mux.HandleFunc("/api/lan-qr/", withCORS(handleLANQR))
 	mux.HandleFunc("/api/public-qr/", withCORS(handlePublicQR))
 	mux.HandleFunc("/api/share-tools", withCORS(handleShareTools))
+	mux.HandleFunc("/api/share-access", withCORS(handleShareAccess))
 	mux.HandleFunc("/api/tools/", withCORS(publishAfter(handleTools, eventbus.KindStatus)))
 	mux.HandleFunc("/api/tunnel-qr/", withCORS(handleTunnelQR))
 	mux.HandleFunc("/api/dashboard-qr", withCORS(handleDashboardQR))

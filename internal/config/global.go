@@ -179,6 +179,10 @@ type GlobalConfig struct {
 		// proxy (netbird, nginx, ...) at "<site>.<base>" → that port. A domain
 		// the user controls, never a bare TLD. Set via the dashboard's share menu.
 		PublicBaseDomain string `yaml:"public_base_domain,omitempty" mapstructure:"public_base_domain"`
+		// PublicListen enables the common public Host ingress when non-empty.
+		PublicListen string `yaml:"public_listen,omitempty" mapstructure:"public_listen"`
+		// TrustedProxies may supply one validated X-Forwarded-For address.
+		TrustedProxies []string `yaml:"trusted_proxies,omitempty" mapstructure:"trusted_proxies"`
 	} `yaml:"share,omitempty" mapstructure:"share"`
 	Nginx struct {
 		HTTPPort  int `yaml:"http_port"  mapstructure:"http_port"`

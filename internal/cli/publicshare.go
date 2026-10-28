@@ -94,7 +94,7 @@ func PublicShareStart(siteName string) (string, error) {
 	// The port is persisted only once it is bound. Saving first would leave a
 	// dead port in the registry after a failed bind, and every later start
 	// would retry that same port instead of picking a free one.
-	srv, err := startPublicShareProxyFor(site.PrimaryDomain(), port, site.Secured)
+	srv, err := startPublicShareProxyFor(site.PrimaryDomain(), port, site.Secured, siteName, "")
 	if err != nil {
 		return "", err
 	}
@@ -166,7 +166,7 @@ func PublicShareStartWorktree(siteName, branch string) (string, error) {
 		port = assignPublicSharePort(siteName, branch)
 	}
 
-	srv, err := startPublicShareProxyFor(worktreeDomain, port, site.Secured)
+	srv, err := startPublicShareProxyFor(worktreeDomain, port, site.Secured, siteName, branch)
 	if err != nil {
 		return "", err
 	}
@@ -219,7 +219,7 @@ func RestorePublicShareProxies() {
 			continue
 		}
 		if s.PublicPort != 0 {
-			if srv, err := startPublicShareProxyFor(s.PrimaryDomain(), s.PublicPort, s.Secured); err == nil {
+			if srv, err := startPublicShareProxyFor(s.PrimaryDomain(), s.PublicPort, s.Secured, s.Name, ""); err == nil {
 				publicShareMu.Lock()
 				publicShareServers[s.Name] = srv
 				publicShareMu.Unlock()
@@ -229,7 +229,7 @@ func RestorePublicShareProxies() {
 			if port == 0 {
 				continue
 			}
-			srv, err := startPublicShareProxyFor(branch+"."+s.PrimaryDomain(), port, s.Secured)
+			srv, err := startPublicShareProxyFor(branch+"."+s.PrimaryDomain(), port, s.Secured, s.Name, branch)
 			if err != nil {
 				continue
 			}
@@ -255,9 +255,11 @@ func StopAllPublicShares() {
 // startPublicShareProxyFor starts the shared LAN-share proxy for a public share.
 // The proxy derives the public-facing host from the incoming Host header, so the
 // same implementation serves a LAN IP or a public hostname alike.
-func startPublicShareProxyFor(domain string, port int, secured bool) (*http.Server, error) {
+func startPublicShareProxyFor(domain string, port int, secured bool, siteName, branch string) (*http.Server, error) {
 	httpPort, httpsPort := config.NginxPorts()
-	return startLANShareProxy(domain, port, httpPort, httpsPort, secured, reachPublic)
+	return startLANShareProxy(domain, port, httpPort, httpsPort, secured, reachPublic, func(next http.Handler) http.Handler {
+		return ShareAccessStore().Middleware(siteName, branch, shareTrustedProxies, next)
+	})
 }
 
 // PublicShareRefreshIfRunning re-binds any running public proxy for the site to

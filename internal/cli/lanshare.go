@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	qrcode "github.com/skip2/go-qrcode"
 
@@ -489,7 +490,7 @@ func (r shareReach) scheme() string {
 	return "http"
 }
 
-func startLANShareProxy(domain string, port, httpPort, httpsPort int, secured bool, reach shareReach) (*http.Server, error) {
+func startLANShareProxy(domain string, port, httpPort, httpsPort int, secured bool, reach shareReach, wrap ...func(http.Handler) http.Handler) (*http.Server, error) {
 	var target *url.URL
 	if secured {
 		target = &url.URL{Scheme: "https", Host: fmt.Sprintf("localhost:%d", httpsPort)}
@@ -511,6 +512,9 @@ func startLANShareProxy(domain string, port, httpPort, httpsPort int, secured bo
 	proxy.Director = func(req *http.Request) {
 		lanHost := req.Host // e.g. "192.168.1.5:9100"
 		orig(req)
+		if reach == reachPublic {
+			req.Header.Del("X-Forwarded-For")
+		}
 		req.Header.Set("X-Forwarded-Host", lanHost)
 		req.Header.Set("X-Forwarded-Proto", scheme)
 		// Tell upstream the public port so frameworks don't fall back to
@@ -591,8 +595,11 @@ func startLANShareProxy(domain string, port, httpPort, httpsPort int, secured bo
 		return nil, fmt.Errorf("binding port %d: %w", port, err)
 	}
 
-	handler := newLANShareHandler(proxy, reach)
-	srv := &http.Server{Handler: handler}
+	var handler http.Handler = newLANShareHandler(proxy, reach)
+	for _, middleware := range wrap {
+		handler = middleware(handler)
+	}
+	srv := &http.Server{Addr: ln.Addr().String(), Handler: handler, ReadHeaderTimeout: 10 * time.Second}
 	go srv.Serve(ln) //nolint:errcheck
 	return srv, nil
 }
