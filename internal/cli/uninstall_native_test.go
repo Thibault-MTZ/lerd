@@ -15,3 +15,16 @@ func TestUninstallStopsEveryNativePool(t *testing.T) {
 		t.Errorf("stopped %v, want %v", stopped, want)
 	}
 }
+
+// The watcher repairs DNS it finds broken, so a teardown that ran while it was
+// up got undone a second later and left .test routed to a dead lerd-dns.
+func TestUninstallStopsTheWatcherBeforeDNSTeardown(t *testing.T) {
+	var calls []string
+	stopWatcherThenTeardownDNS(
+		func(unit string) error { calls = append(calls, "stop "+unit); return nil },
+		func() { calls = append(calls, "teardown") },
+	)
+	if want := []string{"stop lerd-watcher", "teardown"}; !reflect.DeepEqual(calls, want) {
+		t.Errorf("calls %v, want %v", calls, want)
+	}
+}
