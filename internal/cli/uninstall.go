@@ -92,7 +92,9 @@ func runUninstall(force, keepData bool) error {
 	// DNS teardown runs outside the step runner because it may prompt for sudo;
 	// the lock glyph warns that the password prompt below is expected.
 	feedback.Sudo("Removing DNS configuration")
-	stopWatcherThenTeardownDNS(podman.StopUnit, dns.Teardown)
+	if err := stopWatcherThenTeardownDNS(podman.StopUnit, unitActive, dns.Teardown); err != nil {
+		return err
+	}
 	removePortDropIn()
 
 	if !removeData {
@@ -270,12 +272,20 @@ func installedDefaultServices(names []string, installed func(unit string) bool) 
 	return out
 }
 
-// stopWatcherThenTeardownDNS stops the watcher before removing lerd's resolver
-// setup: the watcher heals DNS it finds broken, and mid-uninstall it rebuilt lerd0
-// and a resolved drop-in pointing at a lerd-dns that was about to be gone.
-func stopWatcherThenTeardownDNS(stop func(string) error, teardown func()) {
-	_ = stop("lerd-watcher")
+// stopWatcherThenTeardownDNS stops the watcher first: it heals DNS it finds
+// broken, and mid-uninstall rebuilt lerd0 for a lerd-dns about to be gone. A
+// failed stop only matters while the watcher still runs.
+func stopWatcherThenTeardownDNS(stop func(string) error, active func(string) bool, teardown func()) error {
+	if err := stop("lerd-watcher"); err != nil && active("lerd-watcher") {
+		return fmt.Errorf("stopping lerd-watcher before removing the DNS setup: %w", err)
+	}
 	teardown()
+	return nil
+}
+
+func unitActive(unit string) bool {
+	status, _ := podman.UnitStatus(unit)
+	return status == "active"
 }
 
 // stopNativePools takes the native FPM pools down by their own launchd label.

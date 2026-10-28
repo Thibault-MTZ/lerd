@@ -26,7 +26,7 @@ Without a terminal and without one of those flags, `lerd uninstall` stops before
 
 ## Linux
 
-`lerd uninstall` also removes the `lerd` Podman network, the watcher, the desktop entry, the `lerd0` DNS interface and its NetworkManager rule, and `/etc/sysctl.d/99-lerd-ports.conf`. It restores systemd-resolved's fallback DNS servers if Lerd turned them off. On Omarchy it takes the Lerd Glance widget off the bar.
+It stops the watcher before it touches DNS, since the watcher would otherwise repair the setup it sees disappear, and if the watcher cannot be stopped, the uninstall ends there without changing anything. `lerd uninstall` also removes the `lerd` Podman network, the watcher, the desktop entry, the `lerd0` DNS interface and its NetworkManager rule, and `/etc/sysctl.d/99-lerd-ports.conf`. It restores systemd-resolved's fallback DNS servers if Lerd turned them off. On Omarchy it takes the Lerd Glance widget off the bar.
 
 If Lerd came from a package, the binary stays for the package manager to remove, and `lerd uninstall` prints the command:
 
