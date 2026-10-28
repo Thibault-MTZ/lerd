@@ -92,7 +92,7 @@ func runUninstall(force, keepData bool) error {
 	// DNS teardown runs outside the step runner because it may prompt for sudo;
 	// the lock glyph warns that the password prompt below is expected.
 	feedback.Sudo("Removing DNS configuration")
-	if err := stopWatcherThenTeardownDNS(podman.StopUnit, unitActive, dns.Teardown); err != nil {
+	if err := stopWatcherThenTeardownDNS(podman.StopUnit, unitStopped, dns.Teardown); err != nil {
 		return err
 	}
 	removePortDropIn()
@@ -274,18 +274,21 @@ func installedDefaultServices(names []string, installed func(unit string) bool) 
 
 // stopWatcherThenTeardownDNS stops the watcher first: it heals DNS it finds
 // broken, and mid-uninstall rebuilt lerd0 for a lerd-dns about to be gone. A
-// failed stop only matters while the watcher still runs.
-func stopWatcherThenTeardownDNS(stop func(string) error, active func(string) bool, teardown func()) error {
-	if err := stop("lerd-watcher"); err != nil && active("lerd-watcher") {
-		return fmt.Errorf("stopping lerd-watcher before removing the DNS setup: %w", err)
+// failed stop is fine only when the watcher is confirmed down.
+func stopWatcherThenTeardownDNS(stop func(string) error, stopped func(string) bool, teardown func()) error {
+	if err := stop("lerd-watcher"); err != nil && !stopped("lerd-watcher") {
+		return fmt.Errorf("could not stop lerd-watcher before removing the DNS setup, stop it and run lerd uninstall again: %w", err)
 	}
 	teardown()
 	return nil
 }
 
-func unitActive(unit string) bool {
-	status, _ := podman.UnitStatus(unit)
-	return status == "active"
+func unitStopped(unit string) bool { return confirmedStopped(podman.UnitStatus(unit)) }
+
+// confirmedStopped reads a unit state as stopped only when the service manager
+// answered and said so; "unknown" is what an unreachable bus reports.
+func confirmedStopped(state string, err error) bool {
+	return err == nil && (state == "inactive" || state == "failed")
 }
 
 // stopNativePools takes the native FPM pools down by their own launchd label.

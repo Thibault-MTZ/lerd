@@ -23,7 +23,7 @@ func TestUninstallStopsTheWatcherBeforeDNSTeardown(t *testing.T) {
 	var calls []string
 	err := stopWatcherThenTeardownDNS(
 		func(unit string) error { calls = append(calls, "stop "+unit); return nil },
-		func(string) bool { return false },
+		func(string) bool { return true },
 		func() { calls = append(calls, "teardown") },
 	)
 	if err != nil {
@@ -38,7 +38,7 @@ func TestUninstallRefusesDNSTeardownWhileTheWatcherStillRuns(t *testing.T) {
 	tornDown := false
 	err := stopWatcherThenTeardownDNS(
 		func(string) error { return errors.New("no user bus") },
-		func(string) bool { return true },
+		func(string) bool { return false },
 		func() { tornDown = true },
 	)
 	if err == nil || tornDown {
@@ -52,10 +52,32 @@ func TestUninstallTearsDNSDownWhenTheWatcherIsAlreadyGone(t *testing.T) {
 	tornDown := false
 	err := stopWatcherThenTeardownDNS(
 		func(string) error { return errors.New("unit not loaded") },
-		func(string) bool { return false },
+		func(string) bool { return true },
 		func() { tornDown = true },
 	)
 	if err != nil || !tornDown {
 		t.Errorf("err %v, tornDown %v: want the teardown to run", err, tornDown)
+	}
+}
+
+// An unreachable bus answers "unknown", which must not pass for a stopped
+// watcher, or the teardown runs while it can still undo it.
+func TestConfirmedStoppedOnlyTrustsAStoppedAnswer(t *testing.T) {
+	cases := []struct {
+		state string
+		err   error
+		want  bool
+	}{
+		{"inactive", nil, true},
+		{"failed", nil, true},
+		{"active", nil, false},
+		{"deactivating", nil, false},
+		{"unknown", nil, false},
+		{"inactive", errors.New("no user bus"), false},
+	}
+	for _, c := range cases {
+		if got := confirmedStopped(c.state, c.err); got != c.want {
+			t.Errorf("confirmedStopped(%q, %v) = %v, want %v", c.state, c.err, got, c.want)
+		}
 	}
 }
