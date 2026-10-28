@@ -301,6 +301,9 @@ parameters. `branch` is the native normalized worktree identifier, or empty for
 the parent site. A plugin may reuse an existing page and inspect
 `lerd.context.intent` to open its access controls directly. Opening the action
 does not change publication state or grant additional API authority.
+Call `lerd.close()` to request closing this modal after saving or cancelling.
+The dashboard accepts that message only from the frame that owns the modal;
+other plugin surfaces without a close handler stay open.
 
 A rail page opens in the dashboard's panel, the same place service dashboards open, under its own rule on the rail below lerd's launchers; a site tab sits beside Overview, Logs and the rest, and receives `site`, `domain` and `branch` as query parameters. An Overview card is a section of its own on a site's Overview, below the services, and receives the same parameters. It is off on every site until switched on from the plugin icon in the site's header or with `lerd plugin card <name> on` in the project, and it grows to the height of its page, which the boilerplate's `ui/lerd.js` reports for it.
 

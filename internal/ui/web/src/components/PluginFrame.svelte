@@ -12,8 +12,9 @@
     // autoHeight sizes the frame to the page inside, which reports its height
     // through ui/lerd.js; an Overview card has no space of its own to fill.
     autoHeight?: boolean;
+    onclose?: () => void;
   }
-  let { plugin, url, title, context = {}, autoHeight = false }: Props = $props();
+  let { plugin, url, title, context = {}, autoHeight = false, onclose }: Props = $props();
 
   let frame = $state<HTMLIFrameElement | null>(null);
   let height = $state(48);
@@ -27,6 +28,10 @@
 
   $effect(() => {
     const onMessage = (e: MessageEvent) => {
+      if (frame?.contentWindow && e.source === frame.contentWindow && e.data?.type === 'lerd:close') {
+        onclose?.();
+        return;
+      }
       if (autoHeight && e.source === frame?.contentWindow && e.data?.type === 'lerd:resize') {
         // Capped, so a page that grows without end cannot push the Overview away.
         height = Math.min(Math.max(Number(e.data.height) || 0, 24), 800);

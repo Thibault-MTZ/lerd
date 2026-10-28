@@ -30,6 +30,9 @@ window.lerd = (() => {
       // translates itself.
       lang: params.get('lang') || 'en'
     },
+    close() {
+      window.parent.postMessage({ type: 'lerd:close' }, '*');
+    },
     api(path, { method = 'GET', body } = {}) {
       const id = ++next;
       return new Promise((resolve, reject) => {

@@ -631,7 +631,7 @@
 {#if shareAction?.share_action}
   <Modal open={true} title={shareAction.share_action.title} size="xl" tall={true} onclose={() => (shareAction = null)}>
     <div class="flex flex-1 min-h-0">
-      <PluginFrame plugin={shareAction.name} url={shareAction.share_action.url} title={shareAction.share_action.title} context={shareActionContext} />
+      <PluginFrame plugin={shareAction.name} url={shareAction.share_action.url} title={shareAction.share_action.title} context={shareActionContext} onclose={() => (shareAction = null)} />
     </div>
   </Modal>
 {/if}

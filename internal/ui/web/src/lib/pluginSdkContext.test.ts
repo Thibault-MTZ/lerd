@@ -6,12 +6,14 @@ const nativePath = await vi.importActual<{ resolve(...parts: string[]): string }
 const nativeProcess = await vi.importActual<{ cwd(): string }>('node:process');
 const sdk = nativeFs.readFileSync(nativePath.resolve(nativeProcess.cwd(), '../../plugins/skeleton/ui/lerd.js'), 'utf8');
 
-function context(search: string) {
+function loadSdk(search: string) {
   const host: any = { addEventListener: vi.fn(), parent: { postMessage: vi.fn() } };
   class ResizeObserver { observe() {} }
   new Function('window', 'location', 'ResizeObserver', 'document', sdk)(host, { search }, ResizeObserver, { documentElement: { scrollHeight: 100 } });
-  return host.lerd.context;
+  return host;
 }
+
+function context(search: string) { return loadSdk(search).lerd.context; }
 
 describe('plugin SDK share context', () => {
   it('exposes the explicit action and keeps the native branch identity', () => {
@@ -19,5 +21,11 @@ describe('plugin SDK share context', () => {
   });
   it('does not invent an action for other plugin surfaces', () => {
     expect(context('').intent).toBe('');
+  });
+  it('requests closure through the parent without changing context', () => {
+    const host = loadSdk('?site=demo&intent=access');
+    host.lerd.close();
+    expect(host.parent.postMessage).toHaveBeenCalledWith({ type: 'lerd:close' }, '*');
+    expect(host.lerd.context.site).toBe('demo');
   });
 });
