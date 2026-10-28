@@ -66,9 +66,17 @@ Cette vérification couvre aussi les écritures des endpoints plugins marqués
 
 Modes : `closed`, `public`, `ip`, `password`, `ip_and_password`,
 `ip_or_password`. Les modes IP exigent au moins un CIDR IPv4 ou IPv6 valide.
+`denial_status` vaut 403 par défaut, y compris pour les anciennes politiques,
+ou 404 pour un refus fermé/IP avec une réponse neutre « page not found ».
+Le challenge Basic reste 401 et la limitation de requêtes 429.
 Les modes avec mot de passe exigent au moins un compte après les mutations.
 Une mutation de compte remplace son secret ; `remove_users` retire des comptes.
-Les mots de passe contiennent de 8 à 72 octets UTF-8 et sont stockés en bcrypt.
+Tout mot de passe non vide est accepté, sans longueur minimale ni limite bcrypt
+de 72 octets. Le plafond technique du corps JSON reste de 64 Kio. Les nouveaux
+secrets sont condensés en SHA-256, encodés en Base64 sans remplissage, puis
+stockés en bcrypt avec le préfixe versionné `$lerd$sha256-bcrypt$v1$`.
+Les anciens hashes bcrypt restent reconnus sans modification ; changer leur
+mot de passe utilise automatiquement le nouveau format.
 L’authentification Basic de la barrière utilise l’en-tête Authorization, retiré
 avant l’application seulement lorsqu’il a servi à cette authentification.
 Avec `ip_or_password`, une IP autorisée conserve l’authentification de

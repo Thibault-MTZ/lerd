@@ -2,6 +2,8 @@
 package shareaccess
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -24,6 +26,22 @@ import (
 
 var ErrConflict = errors.New("policy revision conflict")
 
+const passwordHashPrefix = "$lerd$sha256-bcrypt$v1$"
+
+func passwordInput(secret string) []byte {
+	digest := sha256.Sum256([]byte(secret))
+	return []byte(base64.RawStdEncoding.EncodeToString(digest[:]))
+}
+
+func passwordMatches(hash, secret string) bool {
+	input := []byte(secret)
+	if strings.HasPrefix(hash, passwordHashPrefix) {
+		hash = strings.TrimPrefix(hash, passwordHashPrefix)
+		input = passwordInput(secret)
+	}
+	return bcrypt.CompareHashAndPassword([]byte(hash), input) == nil
+}
+
 type Rate struct {
 	RequestsPerSecond float64 `json:"requests_per_second"`
 	Burst             int     `json:"burst"`
@@ -32,29 +50,31 @@ type User struct {
 	Username string `json:"username"`
 }
 type Policy struct {
-	Version     int      `json:"version"`
-	Site        string   `json:"site"`
-	Branch      string   `json:"branch"`
-	Mode        string   `json:"mode"`
-	Networks    []string `json:"networks"`
-	Users       []User   `json:"users"`
-	Rate        Rate     `json:"rate"`
-	Revision    uint64   `json:"revision"`
-	Enforcement string   `json:"enforcement"`
+	Version      int      `json:"version"`
+	Site         string   `json:"site"`
+	Branch       string   `json:"branch"`
+	Mode         string   `json:"mode"`
+	Networks     []string `json:"networks"`
+	Users        []User   `json:"users"`
+	Rate         Rate     `json:"rate"`
+	Revision     uint64   `json:"revision"`
+	Enforcement  string   `json:"enforcement"`
+	DenialStatus int      `json:"denial_status"`
 }
 type Credential struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
 }
 type Update struct {
-	Site        string       `json:"site"`
-	Branch      string       `json:"branch"`
-	Mode        string       `json:"mode"`
-	Networks    []string     `json:"networks"`
-	Credentials []Credential `json:"credentials"`
-	RemoveUsers []string     `json:"remove_users"`
-	Rate        Rate         `json:"rate"`
-	Revision    uint64       `json:"revision"`
+	Site         string       `json:"site"`
+	Branch       string       `json:"branch"`
+	Mode         string       `json:"mode"`
+	Networks     []string     `json:"networks"`
+	Credentials  []Credential `json:"credentials"`
+	RemoveUsers  []string     `json:"remove_users"`
+	Rate         Rate         `json:"rate"`
+	Revision     uint64       `json:"revision"`
+	DenialStatus int          `json:"denial_status"`
 }
 type record struct {
 	Policy Policy            `json:"policy"`
@@ -79,7 +99,7 @@ type Store struct {
 func NewStore(path string) *Store    { return &Store{path: path, buckets: map[string]bucket{}} }
 func key(site, branch string) string { return site + "\x00" + branch }
 func defaultPolicy(site, branch string) Policy {
-	return Policy{Version: 1, Site: site, Branch: branch, Mode: "closed", Networks: []string{}, Users: []User{}, Rate: Rate{Burst: 60}, Enforcement: "native"}
+	return Policy{Version: 1, Site: site, Branch: branch, Mode: "closed", Networks: []string{}, Users: []User{}, Rate: Rate{Burst: 60}, Enforcement: "native", DenialStatus: 403}
 }
 func (s *Store) read() (document, error) {
 	d := document{Version: 1, Policies: map[string]record{}}
@@ -107,6 +127,10 @@ func (s *Store) read() (document, error) {
 	}
 	// Validate stored data too: corruption must never widen access.
 	for k, r := range d.Policies {
+		if r.Policy.DenialStatus == 0 {
+			r.Policy.DenialStatus = 403
+			d.Policies[k] = r
+		}
 		if k != key(r.Policy.Site, r.Policy.Branch) || r.Policy.Version != 1 || r.Policy.Revision == 0 {
 			return d, errors.New("invalid policy identity")
 		}
@@ -149,6 +173,9 @@ func validIdentity(v string) bool {
 	return v != "" && len(v) <= 256 && !strings.ContainsAny(v, "\x00\r\n")
 }
 func validate(p Policy, hashes map[string]string) error {
+	if p.DenialStatus != 403 && p.DenialStatus != 404 {
+		return errors.New("invalid denial status")
+	}
 	if !validIdentity(p.Site) || len(p.Branch) > 256 || strings.ContainsAny(p.Branch, "\x00\r\n") {
 		return errors.New("invalid site or branch")
 	}
@@ -172,7 +199,7 @@ func validate(p Policy, hashes map[string]string) error {
 		return errors.New("password mode requires credentials")
 	}
 	for name, hash := range hashes {
-		cost, err := bcrypt.Cost([]byte(hash))
+		cost, err := bcrypt.Cost([]byte(strings.TrimPrefix(hash, passwordHashPrefix)))
 		if !validUsername(name) || err != nil || cost > 14 || cost < 4 {
 			return errors.New("invalid stored credential")
 		}
@@ -204,6 +231,9 @@ func (s *Store) Put(u Update) (Policy, error) {
 	p.Networks = u.Networks
 	p.Rate = u.Rate
 	p.Revision = u.Revision + 1
+	if u.DenialStatus != 0 {
+		p.DenialStatus = u.DenialStatus
+	}
 	hashes := map[string]string{}
 	for n, h := range old.Hashes {
 		hashes[n] = h
@@ -219,15 +249,15 @@ func (s *Store) Put(u Update) (Policy, error) {
 	}
 	seen := map[string]bool{}
 	for _, c := range u.Credentials {
-		if !validUsername(c.Username) || len(c.Password) < 8 || len(c.Password) > 72 || seen[c.Username] {
-			return Policy{}, errors.New("invalid credentials (password must contain 8 to 72 bytes)")
+		if !validUsername(c.Username) || c.Password == "" || seen[c.Username] {
+			return Policy{}, errors.New("invalid credentials (password must not be empty)")
 		}
 		seen[c.Username] = true
-		h, e := bcrypt.GenerateFromPassword([]byte(c.Password), bcrypt.DefaultCost)
+		h, e := bcrypt.GenerateFromPassword(passwordInput(c.Password), bcrypt.DefaultCost)
 		if e != nil {
 			return Policy{}, e
 		}
-		hashes[c.Username] = string(h)
+		hashes[c.Username] = passwordHashPrefix + string(h)
 	}
 	if p.Networks == nil {
 		p.Networks = []string{}
@@ -361,11 +391,15 @@ func (s *Store) Middleware(site, branch string, trusted func() ([]string, error)
 			return
 		}
 		rec, ok := d.Policies[key(site, branch)]
-		if !ok || rec.Policy.Mode == "closed" {
+		if !ok {
 			http.Error(w, "Share access denied", 403)
 			return
 		}
 		p := rec.Policy
+		if p.Mode == "closed" {
+			writeShareDenied(w, r, p.DenialStatus)
+			return
+		}
 		peers, err := trusted()
 		if err != nil {
 			http.Error(w, "Share access unavailable", 403)
@@ -393,7 +427,7 @@ func (s *Store) Middleware(site, branch string, trusted func() ([]string, error)
 		authOK := false
 		needsAuth := p.Mode == "password" || p.Mode == "ip_and_password" && ipOK || p.Mode == "ip_or_password" && !ipOK
 		if hash, exists := rec.Hashes[user]; exists && basic && needsAuth {
-			authOK = bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) == nil
+			authOK = passwordMatches(hash, password)
 		}
 		permitted := false
 		switch p.Mode {
@@ -409,12 +443,12 @@ func (s *Store) Middleware(site, branch string, trusted func() ([]string, error)
 			permitted = ipOK || authOK
 		}
 		if !permitted {
-			code := 403
+			code := p.DenialStatus
 			if p.Mode == "password" || p.Mode == "ip_or_password" || (p.Mode == "ip_and_password" && ipOK) {
 				code = 401
 				w.Header().Set("WWW-Authenticate", `Basic realm="Shared site", charset="UTF-8"`)
 			}
-			http.Error(w, "Share access denied", code)
+			writeShareDenied(w, r, code)
 			return
 		}
 		// Do not expose gate credentials or attacker-controlled proxy identity downstream.
@@ -429,4 +463,12 @@ func (s *Store) Middleware(site, branch string, trusted func() ([]string, error)
 		clone.RemoteAddr = net.JoinHostPort(ip.String(), "0")
 		next.ServeHTTP(w, clone)
 	})
+}
+
+func writeShareDenied(w http.ResponseWriter, r *http.Request, status int) {
+	if status == 404 {
+		http.NotFound(w, r)
+		return
+	}
+	http.Error(w, "Share access denied", status)
 }

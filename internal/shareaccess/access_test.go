@@ -2,6 +2,7 @@ package shareaccess
 
 import (
 	"encoding/json"
+	"golang.org/x/crypto/bcrypt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -9,6 +10,105 @@ import (
 	"strings"
 	"testing"
 )
+
+func TestNewPasswordsAcceptNonemptyUTF8OfAnyLength(t *testing.T) {
+	for _, secret := range []string{"x", "é", " ", strings.Repeat("密", 40), strings.Repeat("x", 128)} {
+		s := NewStore(filepath.Join(t.TempDir(), "access.json"))
+		_, err := s.Put(Update{Site: "demo", Mode: "password", Credentials: []Credential{{Username: "reader", Password: secret}}, Rate: Rate{Burst: 60}})
+		if err != nil {
+			t.Fatalf("%d bytes: %v", len(secret), err)
+		}
+		d, _ := s.read()
+		hash := d.Policies[key("demo", "")].Hashes["reader"]
+		if !strings.HasPrefix(hash, "$lerd$sha256-bcrypt$v1$") {
+			t.Fatal("unversioned new credential")
+		}
+		h := s.Middleware("demo", "", func() ([]string, error) { return nil, nil }, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) }))
+		r := httptest.NewRequest("GET", "http://demo.example/", nil)
+		r.RemoteAddr = "192.0.2.1:123"
+		r.SetBasicAuth("reader", secret)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if w.Code != 204 {
+			t.Fatalf("%d bytes auth: %d", len(secret), w.Code)
+		}
+	}
+}
+
+func TestLegacyBcryptCredentialsStillAuthenticate(t *testing.T) {
+	s := NewStore(filepath.Join(t.TempDir(), "access.json"))
+	raw, err := bcrypt.GenerateFromPassword([]byte("legacy password"), bcrypt.MinCost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := defaultPolicy("demo", "")
+	p.Mode = "password"
+	p.Revision = 1
+	p.Users = []User{{Username: "reader"}}
+	d := document{Version: 1, Policies: map[string]record{key("demo", ""): {Policy: p, Hashes: map[string]string{"reader": string(raw)}}}}
+	data, _ := json.Marshal(d)
+	if err = os.WriteFile(s.path, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	h := s.Middleware("demo", "", func() ([]string, error) { return nil, nil }, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) }))
+	r := httptest.NewRequest("GET", "http://demo.example/", nil)
+	r.RemoteAddr = "192.0.2.1:123"
+	r.SetBasicAuth("reader", "legacy password")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != 204 {
+		t.Fatal(w.Code)
+	}
+	if _, err = s.Put(Update{Site: "demo", Mode: "password", Revision: 1, Credentials: []Credential{{Username: "reader", Password: ""}}, Rate: Rate{Burst: 60}}); err == nil {
+		t.Fatal("empty password accepted")
+	}
+}
+
+func TestDenialStatusDefaultsAndHidesDeniedContent(t *testing.T) {
+	s := NewStore(filepath.Join(t.TempDir(), "access.json"))
+	p, err := s.Get("demo", "")
+	if err != nil || p.DenialStatus != 403 {
+		t.Fatalf("default: %+v %v", p, err)
+	}
+	for _, mode := range []string{"closed", "ip", "password"} {
+		p, err = s.Put(Update{Site: "demo", Mode: mode, Networks: []string{"192.0.2.0/24"}, Credentials: []Credential{{Username: "reader", Password: "x"}}, Rate: Rate{Burst: 60}, Revision: p.Revision, DenialStatus: 404})
+		if err != nil {
+			t.Fatal(err)
+		}
+		h := s.Middleware("demo", "", func() ([]string, error) { return nil, nil }, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { t.Fatal("denied request reached private content") }))
+		r := httptest.NewRequest("GET", "http://demo.example/", nil)
+		r.RemoteAddr = "198.51.100.1:123"
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		want := 404
+		if mode == "password" {
+			want = 401
+		}
+		if w.Code != want {
+			t.Fatalf("mode=%s code=%d", mode, w.Code)
+		}
+		if want == 404 && w.Body.String() != "404 page not found\n" {
+			t.Fatal("non-neutral denial body", w.Body.String())
+		}
+	}
+	data, _ := os.ReadFile(s.path)
+	var doc map[string]any
+	_ = json.Unmarshal(data, &doc)
+	for _, entry := range doc["policies"].(map[string]any) {
+		delete(entry.(map[string]any)["policy"].(map[string]any), "denial_status")
+	}
+	data, _ = json.Marshal(doc)
+	if err = os.WriteFile(s.path, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	p, err = s.Get("demo", "")
+	if err != nil || p.DenialStatus != 403 {
+		t.Fatalf("legacy: %+v %v", p, err)
+	}
+	if _, err = s.Put(Update{Site: "demo", Mode: "closed", Rate: Rate{Burst: 60}, Revision: p.Revision, DenialStatus: 200}); err == nil {
+		t.Fatal("invalid denial code accepted")
+	}
+}
 
 func TestPolicyValidationAndCAS(t *testing.T) {
 	s := NewStore(filepath.Join(t.TempDir(), "policies.json"))
