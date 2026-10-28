@@ -56,6 +56,11 @@ la révision ; une révision périmée retourne 409. Une cible inconnue retourne
 404 et une entrée invalide 400. Les protections d’autorité et CSRF du dashboard
 s’appliquent. Un plugin local utilise son jeton natif pour ses requêtes.
 Les réponses, erreurs et exports ne contiennent jamais de mot de passe ni de hash.
+Les écritures depuis un navigateur exigent l’origine exacte du dashboard,
+même si une application voisine est considérée « same-site ». Le proxy du
+dashboard doit conserver son Host réel et transmettre son schéma HTTPS.
+Cette vérification couvre aussi les écritures des endpoints plugins marqués
+`loopback_only`, avant le lancement de leur script.
 
 Modes : `closed`, `public`, `ip`, `password`, `ip_and_password`,
 `ip_or_password`. Les modes IP exigent au moins un CIDR IPv4 ou IPv6 valide.

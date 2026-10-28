@@ -15,6 +15,10 @@ import (
 
 func handleShareAccess(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
+	if !sameDashboardWriteOrigin(r) {
+		http.Error(w, "forbidden origin", 403)
+		return
+	}
 	if !hasHostActionAuthority(r) {
 		http.Error(w, "forbidden", 403)
 		return

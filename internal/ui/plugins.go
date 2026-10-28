@@ -192,6 +192,10 @@ func handlePluginAPI(w http.ResponseWriter, r *http.Request) {
 // runPluginEndpoint answers one call to a plugin endpoint, for the site it
 // concerns when there is one.
 func runPluginEndpoint(w http.ResponseWriter, r *http.Request, p *plugins.Plugin, e *plugins.Endpoint, site *config.Site, branch string) {
+	if e.LoopbackOnly && !sameDashboardWriteOrigin(r) {
+		http.Error(w, "forbidden origin", http.StatusForbidden)
+		return
+	}
 	if !slices.Contains(endpointMethods(e), r.Method) {
 		w.Header().Set("Allow", strings.Join(endpointMethods(e), ", "))
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
