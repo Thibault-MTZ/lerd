@@ -28,6 +28,27 @@ func TestSensitiveWriteOriginRejectsSibling(t *testing.T) {
 	}
 }
 
+func TestSensitiveWriteOriginBehindLoopbackTLSProxy(t *testing.T) {
+	for _, test := range []struct {
+		peer, origin string
+		want         bool
+	}{
+		{"127.0.0.1:123", "https://lerd.example.test", true},
+		{"[::1]:123", "https://lerd.example.test", true},
+		{"127.0.0.1:123", "https://app.example.test", false},
+		{"192.0.2.5:123", "https://lerd.example.test", false},
+	} {
+		r := httptest.NewRequest("POST", "http://lerd.example.test/api/plugins/echo/host", nil)
+		r.RemoteAddr = test.peer
+		r.Header.Set("Origin", test.origin)
+		r.Header.Set("X-Forwarded-Proto", "https")
+		r.Header.Set("Sec-Fetch-Site", "same-site")
+		if got := sameDashboardWriteOrigin(r); got != test.want {
+			t.Errorf("peer=%s origin=%s got=%v", test.peer, test.origin, got)
+		}
+	}
+}
+
 func TestPluginSensitiveOriginStopsBeforeScript(t *testing.T) {
 	installAPIPlugin(t)
 	p, err := plugins.Find("echo")

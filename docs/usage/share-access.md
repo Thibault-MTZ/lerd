@@ -59,6 +59,8 @@ Les réponses, erreurs et exports ne contiennent jamais de mot de passe ni de ha
 Les écritures depuis un navigateur exigent l’origine exacte du dashboard,
 même si une application voisine est considérée « same-site ». Le proxy du
 dashboard doit conserver son Host réel et transmettre son schéma HTTPS.
+Un proxy local sur loopback peut transmettre ce schéma même lorsqu’il supprime
+les en-têtes d’identité ; cela ne lui accorde aucune autorité supplémentaire.
 Cette vérification couvre aussi les écritures des endpoints plugins marqués
 `loopback_only`, avant le lancement de leur script.
 

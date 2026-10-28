@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -28,9 +29,13 @@ func sameDashboardWriteOrigin(r *http.Request) bool {
 		return true
 	}
 	scheme := "http"
+	// A loopback TLS terminator may strip identity headers. This only determines
+	// the URL scheme; it never grants request authority.
+	peer, _, _ := net.SplitHostPort(r.RemoteAddr)
+	loopbackPeer := net.ParseIP(peer).IsLoopback()
 	if r.TLS != nil {
 		scheme = "https"
-	} else if forwardedByProxy(r) && r.Header.Get("X-Forwarded-Proto") == "https" {
+	} else if (forwardedByProxy(r) || loopbackPeer) && r.Header.Get("X-Forwarded-Proto") == "https" {
 		scheme = "https"
 	}
 	return u.Scheme == scheme && strings.EqualFold(u.Host, r.Host)
