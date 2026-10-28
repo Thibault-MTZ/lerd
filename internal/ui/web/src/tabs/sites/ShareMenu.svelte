@@ -61,7 +61,7 @@
 
   function openShareAction(plugin: PluginInfo) {
     if (!publicShared || !plugin.share_action) return;
-    shareActionContext = { site: site.name, domain: activeWorktreeBranch ? activeWorktree?.domain ?? '' : site.domain, branch: activeWorktreeBranch, intent: 'access' };
+    shareActionContext = { site: site.name ?? '', domain: activeWorktreeBranch ? activeWorktree?.domain ?? '' : site.domain, branch: activeWorktreeBranch, intent: 'access' };
     shareAction = plugin;
     closeNow();
   }

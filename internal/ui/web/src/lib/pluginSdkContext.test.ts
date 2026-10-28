@@ -1,8 +1,10 @@
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { describe, it, expect, vi } from 'vitest';
 
-const sdk = readFileSync(resolve(process.cwd(), '../../plugins/skeleton/ui/lerd.js'), 'utf8');
+// Read the shipped SDK without exposing its directory through Vite's dev server.
+const nativeFs = await vi.importActual<{ readFileSync(path: string, encoding: 'utf8'): string }>('node:fs');
+const nativePath = await vi.importActual<{ resolve(...parts: string[]): string }>('node:path');
+const nativeProcess = await vi.importActual<{ cwd(): string }>('node:process');
+const sdk = nativeFs.readFileSync(nativePath.resolve(nativeProcess.cwd(), '../../plugins/skeleton/ui/lerd.js'), 'utf8');
 
 function context(search: string) {
   const host: any = { addEventListener: vi.fn(), parent: { postMessage: vi.fn() } };
