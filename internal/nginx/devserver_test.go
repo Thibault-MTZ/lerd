@@ -1,9 +1,13 @@
 package nginx
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"text/template"
+
+	"github.com/geodro/lerd/internal/config"
 )
 
 // The dev server's whole point is one prefix carrying both assets and the
@@ -102,6 +106,42 @@ func TestRenderVhost_devServerDownAnswersReadable502(t *testing.T) {
 		} {
 			if !strings.Contains(got, want) {
 				t.Errorf("%s missing %q:\n%s", name, want, got)
+			}
+		}
+	}
+}
+
+// A FrankenPHP or custom container site proxies everything else to its
+// container, so without its own dev server location the app answers the
+// prefix and the page loads with no assets.
+func TestRenderContainerVhost_devServerPrefixAheadOfApp(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmp)
+	t.Setenv("XDG_DATA_HOME", tmp)
+	sitePath := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(sitePath, "node_modules", "vite"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	site := config.Site{Name: "myapp", Domains: []string{"myapp.test"}, Path: sitePath, DevServerPort: 5174}
+
+	for _, ssl := range []bool{false, true} {
+		out, err := renderContainerVhost(site, "lerd-fp-myapp", 8000, false, ssl)
+		if err != nil {
+			t.Fatalf("ssl=%v: renderContainerVhost: %v", ssl, err)
+		}
+		got := string(out)
+		devAt := strings.Index(got, "location ^~ /@lerd-vite/ {")
+		appAt := strings.Index(got, "location / {")
+		if devAt < 0 || devAt > appAt {
+			t.Errorf("ssl=%v: dev server location missing or after location /:\n%s", ssl, got)
+		}
+		for _, want := range []string{
+			":5174;",
+			"error_page 502 = @lerd_dev_down;",
+			"location @lerd_dev_unprefixed {",
+		} {
+			if !strings.Contains(got, want) {
+				t.Errorf("ssl=%v: vhost missing %q:\n%s", ssl, want, got)
 			}
 		}
 	}

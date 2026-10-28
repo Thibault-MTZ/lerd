@@ -184,6 +184,9 @@ type VhostData struct {
 	// under, so one location covers its assets and its hot-reload socket.
 	DevServerBase string
 	DevServerPort int
+	// DevServerConf is the dev server's locations, rendered once from
+	// devserver.conf.tmpl so every vhost shape carries the same block.
+	DevServerConf string
 	UpstreamHost  string // host-proxy upstream address (e.g. "host.containers.internal")
 	UpstreamPort  int    // host-proxy upstream port (the dev server's host port)
 	BackendSSL    bool   // proxy to the backend via HTTPS (app serves TLS on its own port)
@@ -379,11 +382,37 @@ func renderVhost(tmpl *template.Template, data VhostData) ([]byte, error) {
 	if err := data.validate(); err != nil {
 		return nil, err
 	}
+	devServerConf, err := renderDevServerConf(data)
+	if err != nil {
+		return nil, err
+	}
+	data.DevServerConf = devServerConf
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, data); err != nil {
 		return nil, err
 	}
 	return buf.Bytes(), nil
+}
+
+// renderDevServerConf renders the dev server's locations, or "" for a site
+// with no dev server pinned, which leaves its vhost as it was.
+func renderDevServerConf(data VhostData) (string, error) {
+	if data.DevServerBase == "" {
+		return "", nil
+	}
+	raw, err := GetTemplate("devserver.conf.tmpl")
+	if err != nil {
+		return "", err
+	}
+	tmpl, err := template.New("devserver").Parse(string(raw))
+	if err != nil {
+		return "", err
+	}
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, data); err != nil {
+		return "", err
+	}
+	return "\n" + buf.String(), nil
 }
 
 // nginxQuote renders a filesystem path as a quoted nginx token. nginx splits a
@@ -722,12 +751,16 @@ func renderContainerVhost(site config.Site, container string, port int, backendS
 		return nil, err
 	}
 
+	devBase, devPort := detectSiteDevServer(site)
 	data := VhostData{
 		Domain:          site.PrimaryDomain(),
 		ServerNames:     serverNamesWithWildcards(site.Domains),
 		CustomContainer: container,
 		CustomPort:      port,
 		BackendSSL:      backendSSL,
+		UpstreamHost:    hostProxyUpstream(),
+		DevServerBase:   devBase,
+		DevServerPort:   devPort,
 		RequestTimeout:  resolveRequestTimeout(site.Path, site.PHPVersion),
 	}
 	data.PageInjectConf = pageInjectConf(site.Name, "")

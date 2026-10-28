@@ -2,7 +2,7 @@ server {
     listen 80;
     listen [::]:80;
     server_name {{.ServerNames}};
-{{.PageInjectConf}}
+{{.PageInjectConf}}{{.DevServerConf}}
     location / {
         set $backend "{{.CustomContainer}}";
         proxy_pass {{if .BackendSSL}}https{{else}}http{{end}}://$backend:{{.CustomPort}};
