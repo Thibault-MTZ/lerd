@@ -20,38 +20,7 @@ server {
         proxy_read_timeout {{$.RequestTimeout}}s;
         proxy_send_timeout {{$.RequestTimeout}}s;
     }
-{{end}}{{end}}{{if .DevServerBase}}
-    location ^~ {{.DevServerBase}} {
-        proxy_pass http://{{.UpstreamHost}}:{{.DevServerPort}};
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_read_timeout 86400s;
-        # Plugin middleware that runs ahead of the tool's own base handling never
-        # sees the prefix stripped, so a 404 is retried once without it.
-        proxy_intercept_errors on;
-        error_page 404 = @lerd_dev_unprefixed;
-        error_page 502 = @lerd_dev_down;
-    }
-
-    # The page loading these assets may sit on another of the site's domains, and
-    # an error without CORS headers reaches its console as a CORS failure instead.
-    location @lerd_dev_down {
-        default_type text/plain;
-        add_header Access-Control-Allow-Origin * always;
-        return 502 "lerd: nothing is listening on this site's dev server port ({{.DevServerPort}}). Its worker is stopped or its server has died; start it from the dashboard or see lerd worker list.\n";
-    }
-
-    location @lerd_dev_unprefixed {
-        rewrite ^{{.DevServerBase}}(.*)$ /$1 break;
-        proxy_pass http://{{.UpstreamHost}}:{{.DevServerPort}};
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-{{end}}
+{{end}}{{end}}{{.DevServerConf}}
     location / {
         try_files $uri $uri/ /index.php?$query_string;
     }

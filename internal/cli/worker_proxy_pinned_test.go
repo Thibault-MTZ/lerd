@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/geodro/lerd/internal/config"
@@ -119,14 +120,19 @@ func TestWithPinnedWorkerPort_FillsThePortIntoTheCommand(t *testing.T) {
 	}
 }
 
-// A worker start must not replace a FrankenPHP site's container vhost with the
-// FPM render, which points at a shared FPM service the site no longer uses.
-func TestRegenNginxVhost_LeavesFrankenPHPVhostAlone(t *testing.T) {
+// A worker start rewrites a FrankenPHP site's vhost with its own container
+// render, so a dev server pinned by that start gets its location, and never
+// with the FPM render, which points at a shared FPM service the site no longer uses.
+func TestRegenNginxVhost_RewritesFrankenPHPContainerVhost(t *testing.T) {
 	stageSites(t, config.Site{Name: "fp", Path: t.TempDir(), Runtime: "frankenphp", PHPVersion: "8.5", Domains: []string{"fp.test"}})
 
 	regenNginxVhost("fp", t.TempDir())
 
-	if _, err := os.Stat(filepath.Join(config.NginxConfD(), "fp.test.conf")); !os.IsNotExist(err) {
-		t.Errorf("FPM vhost was written for a FrankenPHP site (stat err = %v)", err)
+	got, err := os.ReadFile(filepath.Join(config.NginxConfD(), "fp.test.conf"))
+	if err != nil {
+		t.Fatalf("no vhost written for the FrankenPHP site: %v", err)
+	}
+	if strings.Contains(string(got), "fastcgi_pass") || !strings.Contains(string(got), `set $backend "lerd-fp-fp";`) {
+		t.Errorf("vhost is not the FrankenPHP container render:\n%s", got)
 	}
 }

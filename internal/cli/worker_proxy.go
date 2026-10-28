@@ -20,9 +20,15 @@ func regenNginxVhost(siteName, sitePath string) {
 		return
 	}
 
-	// Custom container, FrankenPHP and host-proxy sites handle proxying through
-	// their own vhost; the FPM render would overwrite it with a dead upstream.
-	if site.IsCustomContainer() || site.IsFrankenPHP() || site.IsHostProxy() {
+	// Host-proxy sites handle proxying through their own vhost, and the FPM
+	// render would give container sites a dead upstream, so they get their own.
+	if site.IsHostProxy() {
+		return
+	}
+	if site.IsCustomContainer() || site.IsFrankenPHP() {
+		if nginx.RegenerateVhost(*site) == nil {
+			_ = nginx.Reload()
+		}
 		return
 	}
 
