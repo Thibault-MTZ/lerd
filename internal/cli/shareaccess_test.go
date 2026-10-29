@@ -130,16 +130,26 @@ func TestPublicIngressAndDirectHandlerSharePolicy(t *testing.T) {
 			t.Fatalf("allowed: %d", got)
 		}
 	}
-	for _, host := range []string{"unknown.dev.example.com", "demo-feature-a.dev.example.com"} {
-		if got := request(ingress, host); got != 403 {
-			t.Fatalf("%s: %d", host, got)
+	if got := request(ingress, "unknown.dev.example.com"); got != 403 {
+		t.Fatalf("unknown host: %d", got)
+	}
+	// A registered worktree without an override follows its parent's IP rule.
+	for _, handler := range []http.Handler{branch, ingress} {
+		if got := request(handler, "demo-feature-a.dev.example.com"); got != 204 {
+			t.Fatalf("inherited: %d", got)
 		}
 	}
-	if _, err := store.Put(shareaccess.Update{Site: "demo", Branch: "feature/a", Mode: "public", Rate: shareaccess.Rate{Burst: 60}}); err != nil {
+	parent, err := store.Get("demo", "")
+	if err != nil {
 		t.Fatal(err)
 	}
-	if got := request(ingress, "demo-feature-a.dev.example.com"); got != 204 {
-		t.Fatal(got)
+	if _, err := store.Put(shareaccess.Update{Site: "demo", Branch: "feature/a", Mode: "closed", ParentRevision: &parent.Revision, Rate: shareaccess.Rate{Burst: 60}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, handler := range []http.Handler{branch, ingress} {
+		if got := request(handler, "demo-feature-a.dev.example.com"); got != 403 {
+			t.Fatalf("closed override: %d", got)
+		}
 	}
 	// Registry entries alone cannot keep a stopped listener reachable.
 	publicShareMu.Lock()
