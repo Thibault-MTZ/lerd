@@ -38,12 +38,16 @@ large permettrait à ses machines de déclarer une fausse identité.
 `GET /api/share-access?site=demo&branch=` retourne :
 
 ```json
-{"version":1,"site":"demo","branch":"","mode":"closed","networks":[],"users":[],"rate":{"requests_per_second":0,"burst":60},"revision":0,"enforcement":"native"}
+{"version":1,"site":"demo","branch":"","inherited":false,"parent_revision":0,"mode":"closed","networks":[],"users":[],"rate":{"requests_per_second":0,"burst":60},"revision":0,"enforcement":"native"}
 ```
 
 `site` est le nom interne LERD. `branch` est la branche native normalisée du
 worktree, champ `branch` de `/api/sites`, et non son libellé Git `git_branch`.
-La politique d’un worktree est indépendante de celle du site parent.
+Sans override, un worktree hérite de la politique et des comptes du site parent.
+La réponse indique `inherited:true` et `parent_revision`, toujours égal à la
+révision actuelle du parent. `revision` est la révision CAS propre à la branche ;
+elle peut rester supérieure à zéro après une réinitialisation vers l’héritage.
+Un parent absent est traité comme une politique `closed`.
 
 `PUT` sur la même URL reçoit :
 
@@ -51,8 +55,16 @@ La politique d’un worktree est indépendante de celle du site parent.
 {"site":"demo","branch":"","mode":"ip_and_password","networks":["192.0.2.0/24"],"credentials":[{"username":"reader","password":"change-this-password"}],"remove_users":[],"rate":{"requests_per_second":5,"burst":60},"revision":0}
 ```
 
-Une politique absente est fermée, révision 0. Une écriture réussie incrémente
-la révision ; une révision périmée retourne 409. Une cible inconnue retourne
+Pour créer ou remplacer l’override d’un worktree, transmettre aussi le
+`parent_revision` obtenu par GET. Les comptes hérités sont conservés côté
+serveur lorsque l’override est créé. Réinitialiser explicitement vers l’héritage
+avec `{"site":"demo","branch":"feature-a","inherit":true,"revision":2,"parent_revision":4}`.
+Cette opération exige les révisions de branche et de parent lues par le client ;
+une révision périmée retourne 409. Une modification ultérieure du parent ne
+change pas un override existant.
+
+Une politique parent absente est fermée, révision 0. Toute écriture réussie
+incrémente la révision de la cible ; une révision périmée retourne 409. Une cible inconnue retourne
 404 et une entrée invalide 400. Les protections d’autorité et CSRF du dashboard
 s’appliquent. Un plugin local utilise son jeton natif pour ses requêtes.
 Les réponses, erreurs et exports ne contiennent jamais de mot de passe ni de hash.

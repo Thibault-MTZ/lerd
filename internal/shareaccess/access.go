@@ -50,45 +50,51 @@ type User struct {
 	Username string `json:"username"`
 }
 type Policy struct {
-	Version      int      `json:"version"`
-	Site         string   `json:"site"`
-	Branch       string   `json:"branch"`
-	Mode         string   `json:"mode"`
-	Networks     []string `json:"networks"`
-	Users        []User   `json:"users"`
-	Rate         Rate     `json:"rate"`
-	Revision     uint64   `json:"revision"`
-	Enforcement  string   `json:"enforcement"`
-	DenialStatus int      `json:"denial_status"`
+	Version        int      `json:"version"`
+	Site           string   `json:"site"`
+	Branch         string   `json:"branch"`
+	Inherited      bool     `json:"inherited"`
+	ParentRevision uint64   `json:"parent_revision"`
+	Mode           string   `json:"mode"`
+	Networks       []string `json:"networks"`
+	Users          []User   `json:"users"`
+	Rate           Rate     `json:"rate"`
+	Revision       uint64   `json:"revision"`
+	Enforcement    string   `json:"enforcement"`
+	DenialStatus   int      `json:"denial_status"`
 }
 type Credential struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
 }
 type Update struct {
-	Site         string       `json:"site"`
-	Branch       string       `json:"branch"`
-	Mode         string       `json:"mode"`
-	Networks     []string     `json:"networks"`
-	Credentials  []Credential `json:"credentials"`
-	RemoveUsers  []string     `json:"remove_users"`
-	Rate         Rate         `json:"rate"`
-	Revision     uint64       `json:"revision"`
-	DenialStatus int          `json:"denial_status"`
+	Site           string       `json:"site"`
+	Branch         string       `json:"branch"`
+	Inherit        bool         `json:"inherit,omitempty"`
+	ParentRevision *uint64      `json:"parent_revision,omitempty"`
+	Mode           string       `json:"mode"`
+	Networks       []string     `json:"networks"`
+	Credentials    []Credential `json:"credentials"`
+	RemoveUsers    []string     `json:"remove_users"`
+	Rate           Rate         `json:"rate"`
+	Revision       uint64       `json:"revision"`
+	DenialStatus   int          `json:"denial_status"`
 }
 type record struct {
-	Policy Policy            `json:"policy"`
-	Hashes map[string]string `json:"password_hashes"`
+	Policy    Policy            `json:"policy"`
+	Hashes    map[string]string `json:"password_hashes"`
+	Inherited bool              `json:"inherited,omitempty"`
 }
 type document struct {
 	Version  int               `json:"version"`
 	Policies map[string]record `json:"policies"`
 }
 type bucket struct {
-	tokens   float64
-	at       time.Time
-	revision uint64
-	expires  time.Time
+	tokens         float64
+	at             time.Time
+	revision       uint64
+	parentRevision uint64
+	expires        time.Time
 }
 type Store struct {
 	path    string
@@ -100,6 +106,49 @@ func NewStore(path string) *Store    { return &Store{path: path, buckets: map[st
 func key(site, branch string) string { return site + "\x00" + branch }
 func defaultPolicy(site, branch string) Policy {
 	return Policy{Version: 1, Site: site, Branch: branch, Mode: "closed", Networks: []string{}, Users: []User{}, Rate: Rate{Burst: 60}, Enforcement: "native", DenialStatus: 403}
+}
+func cloneHashes(src map[string]string) map[string]string {
+	copy := make(map[string]string, len(src))
+	for name, hash := range src {
+		copy[name] = hash
+	}
+	return copy
+}
+func effectiveRecord(d document, site, branch string) record {
+	branchRecord, branchExists := d.Policies[key(site, branch)]
+	if branch == "" {
+		if branchExists {
+			branchRecord.Policy.Inherited = false
+			branchRecord.Policy.ParentRevision = 0
+			return branchRecord
+		}
+		return record{Policy: defaultPolicy(site, ""), Hashes: map[string]string{}}
+	}
+	parent, parentExists := d.Policies[key(site, "")]
+	parentRevision := uint64(0)
+	if parentExists {
+		parentRevision = parent.Policy.Revision
+	}
+	if branchExists && !branchRecord.Inherited {
+		branchRecord.Policy.Inherited = false
+		branchRecord.Policy.ParentRevision = parentRevision
+		return branchRecord
+	}
+	p := defaultPolicy(site, branch)
+	hashes := map[string]string{}
+	if parentExists {
+		p = parent.Policy
+		p.Site = site
+		p.Branch = branch
+		hashes = cloneHashes(parent.Hashes)
+	}
+	p.Inherited = true
+	p.ParentRevision = parentRevision
+	p.Revision = 0
+	if branchExists {
+		p.Revision = branchRecord.Policy.Revision
+	}
+	return record{Policy: p, Hashes: hashes, Inherited: true}
 }
 func (s *Store) read() (document, error) {
 	d := document{Version: 1, Policies: map[string]record{}}
@@ -137,6 +186,9 @@ func (s *Store) read() (document, error) {
 		if err = validate(r.Policy, r.Hashes); err != nil {
 			return d, err
 		}
+		if r.Inherited && (r.Policy.Branch == "" || len(r.Hashes) != 0 || r.Policy.Mode != "closed" || len(r.Policy.Users) != 0 || r.Policy.Inherited || r.Policy.ParentRevision != 0) {
+			return d, errors.New("invalid inherited policy marker")
+		}
 	}
 	return d, nil
 }
@@ -147,10 +199,7 @@ func (s *Store) Get(site, branch string) (Policy, error) {
 	if err != nil {
 		return Policy{}, err
 	}
-	if r, ok := d.Policies[key(site, branch)]; ok {
-		return r.Policy, nil
-	}
-	return defaultPolicy(site, branch), nil
+	return effectiveRecord(d, site, branch).Policy, nil
 }
 
 // Export omits password hashes. Importing authentication rules elsewhere requires
@@ -164,6 +213,9 @@ func (s *Store) Export() ([]Policy, error) {
 	}
 	out := make([]Policy, 0, len(d.Policies))
 	for _, r := range d.Policies {
+		if r.Inherited {
+			continue
+		}
 		out = append(out, r.Policy)
 	}
 	sort.Slice(out, func(i, j int) bool { return key(out[i].Site, out[i].Branch) < key(out[j].Site, out[j].Branch) })
@@ -219,25 +271,81 @@ func (s *Store) Put(u Update) (Policy, error) {
 	if err != nil {
 		return Policy{}, err
 	}
-	old, ok := d.Policies[key(u.Site, u.Branch)]
-	if !ok {
-		old = record{Policy: defaultPolicy(u.Site, u.Branch), Hashes: map[string]string{}}
+	if !validIdentity(u.Site) || len(u.Branch) > 256 || strings.ContainsAny(u.Branch, "\x00\r\n") {
+		return Policy{}, errors.New("invalid site or branch")
 	}
-	if old.Policy.Revision != u.Revision {
+	id := key(u.Site, u.Branch)
+	old, exists := d.Policies[id]
+	parent, parentExists := d.Policies[key(u.Site, "")]
+	parentRevision := uint64(0)
+	if parentExists {
+		parentRevision = parent.Policy.Revision
+	}
+	if u.Inherit {
+		if u.Branch == "" {
+			return Policy{}, errors.New("site policies cannot inherit")
+		}
+		if u.ParentRevision == nil || *u.ParentRevision != parentRevision {
+			return Policy{}, ErrConflict
+		}
+		if !exists || old.Inherited {
+			return Policy{}, errors.New("worktree has no policy override")
+		}
+		if old.Policy.Revision != u.Revision || old.Policy.Revision == math.MaxUint64 {
+			return Policy{}, ErrConflict
+		}
+		marker := defaultPolicy(u.Site, u.Branch)
+		marker.Revision = old.Policy.Revision + 1
+		d.Policies[id] = record{Policy: marker, Hashes: map[string]string{}, Inherited: true}
+		if err = s.write(d); err != nil {
+			return Policy{}, err
+		}
+		return effectiveRecord(d, u.Site, u.Branch).Policy, nil
+	}
+	branchRevision := uint64(0)
+	base := record{Policy: defaultPolicy(u.Site, u.Branch), Hashes: map[string]string{}}
+	var hashes map[string]string
+	if u.Branch == "" {
+		if exists {
+			branchRevision = old.Policy.Revision
+			hashes = cloneHashes(old.Hashes)
+		}
+	} else if exists && !old.Inherited {
+		branchRevision = old.Policy.Revision
+		base = old
+		hashes = cloneHashes(old.Hashes)
+	} else {
+		if exists {
+			branchRevision = old.Policy.Revision
+		}
+		base = effectiveRecord(d, u.Site, u.Branch)
+		if u.ParentRevision == nil || *u.ParentRevision != parentRevision {
+			return Policy{}, ErrConflict
+		}
+		hashes = cloneHashes(base.Hashes)
+	}
+	if u.Revision != branchRevision || branchRevision == math.MaxUint64 {
 		return Policy{}, ErrConflict
 	}
 	p := defaultPolicy(u.Site, u.Branch)
+	if u.Branch != "" {
+		p = base.Policy
+		p.Site = u.Site
+		p.Branch = u.Branch
+		p.Inherited = false
+		p.ParentRevision = 0
+	}
 	p.Mode = u.Mode
 	p.Networks = u.Networks
 	p.Rate = u.Rate
-	p.Revision = u.Revision + 1
+	p.Revision = branchRevision + 1
 	if u.DenialStatus != 0 {
 		p.DenialStatus = u.DenialStatus
 	}
-	hashes := map[string]string{}
-	for n, h := range old.Hashes {
-		hashes[n] = h
+	if hashes == nil {
+		hashes = map[string]string{}
 	}
+	p.Users = []User{}
 	if len(u.Credentials) > 100 || len(u.RemoveUsers) > 100 {
 		return Policy{}, errors.New("too many credentials")
 	}
@@ -278,18 +386,25 @@ func (s *Store) Put(u Update) (Policy, error) {
 	for _, n := range names {
 		p.Users = append(p.Users, User{n})
 	}
-	d.Policies[key(u.Site, u.Branch)] = record{p, hashes}
+	d.Policies[id] = record{Policy: p, Hashes: hashes}
+	if err = s.write(d); err != nil {
+		return Policy{}, err
+	}
+	return effectiveRecord(d, u.Site, u.Branch).Policy, nil
+}
+
+func (s *Store) write(d document) error {
 	data, err := json.MarshalIndent(d, "", "  ")
 	if err != nil {
-		return Policy{}, err
+		return err
 	}
 	config.GuardRealWrite(s.path)
 	if err = os.MkdirAll(filepath.Dir(s.path), 0700); err != nil {
-		return Policy{}, err
+		return err
 	}
 	f, err := os.CreateTemp(filepath.Dir(s.path), ".share-access-*")
 	if err != nil {
-		return Policy{}, err
+		return err
 	}
 	tmp := f.Name()
 	defer os.Remove(tmp)
@@ -307,9 +422,9 @@ func (s *Store) Put(u Update) (Policy, error) {
 		err = os.Rename(tmp, s.path)
 	}
 	if err != nil {
-		return Policy{}, err
+		return err
 	}
-	return p, nil
+	return nil
 }
 
 // ClientIP ignores all forwarding headers unless the socket peer is explicitly
@@ -365,8 +480,12 @@ func (s *Store) allowRate(k string, p Policy) bool {
 			return false
 		}
 	}
-	if !ok || b.revision != p.Revision {
-		b = bucket{tokens: float64(p.Rate.Burst), at: now, revision: p.Revision}
+	parentRevision := uint64(0)
+	if p.Inherited {
+		parentRevision = p.ParentRevision
+	}
+	if !ok || b.revision != p.Revision || b.parentRevision != parentRevision {
+		b = bucket{tokens: float64(p.Rate.Burst), at: now, revision: p.Revision, parentRevision: parentRevision}
 	}
 	b.tokens = math.Min(float64(p.Rate.Burst), b.tokens+now.Sub(b.at).Seconds()*p.Rate.RequestsPerSecond)
 	b.at = now
@@ -390,11 +509,7 @@ func (s *Store) Middleware(site, branch string, trusted func() ([]string, error)
 			http.Error(w, "Share access unavailable", 403)
 			return
 		}
-		rec, ok := d.Policies[key(site, branch)]
-		if !ok {
-			http.Error(w, "Share access denied", 403)
-			return
-		}
+		rec := effectiveRecord(d, site, branch)
 		p := rec.Policy
 		if p.Mode == "closed" {
 			writeShareDenied(w, r, p.DenialStatus)

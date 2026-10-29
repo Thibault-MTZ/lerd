@@ -232,7 +232,7 @@ func TestPluginManager_ListsInstalledAndBroken(t *testing.T) {
 	if len(got) != 2 || got[0].Name != "broken" || got[0].Error == "" || got[1].Name != "echo" || got[1].Error != "" {
 		t.Fatalf("want broken (with its error) then echo, got %+v", got)
 	}
-	if strings.Join(got[1].Adds, ",") != "api,page,site_tab" {
+	if strings.Join(got[1].Adds, ",") != "api,page,site_tab,share_action" {
 		t.Errorf("echo adds = %v", got[1].Adds)
 	}
 	if strings.Join(got[1].Requires, ",") != "/bin/sh" {
@@ -700,7 +700,7 @@ func TestPluginManager_DescribesFeaturesScreenshotsAndDocs(t *testing.T) {
 	for _, f := range r.Features {
 		kinds = append(kinds, f.Kind+":"+f.Name)
 	}
-	if strings.Join(kinds, ",") != "page:Echo,site_tab:Echo" {
+	if strings.Join(kinds, ",") != "page:Echo,site_tab:Echo,share_action:Access rules" {
 		t.Errorf("features = %v", kinds)
 	}
 

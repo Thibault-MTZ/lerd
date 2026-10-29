@@ -141,7 +141,8 @@ func TestPolicyValidationAndCAS(t *testing.T) {
 
 func TestMiddlewareTrustAuthAndRate(t *testing.T) {
 	s := NewStore(filepath.Join(t.TempDir(), "policies.json"))
-	_, err := s.Put(Update{Site: "demo", Branch: "feature/a", Mode: "ip_and_password", Networks: []string{"192.0.2.0/24"}, Credentials: []Credential{{Username: "reader", Password: "secret password"}}, Rate: Rate{RequestsPerSecond: 0.001, Burst: 1}})
+	parentRevision := uint64(0)
+	_, err := s.Put(Update{Site: "demo", Branch: "feature/a", ParentRevision: &parentRevision, Mode: "ip_and_password", Networks: []string{"192.0.2.0/24"}, Credentials: []Credential{{Username: "reader", Password: "secret password"}}, Rate: Rate{RequestsPerSecond: 0.001, Burst: 1}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -265,5 +266,152 @@ func TestExportHasNoSecretsAndInvalidUpdatePreservesPolicy(t *testing.T) {
 	data, _ := json.Marshal(exported)
 	if strings.Contains(string(data), "$2") || strings.Contains(string(data), "secret password") || strings.Contains(string(data), "password_hashes") {
 		t.Fatal("export leaked credentials")
+	}
+}
+
+func TestWorktreeInheritsParentChangesUntilOverride(t *testing.T) {
+	s := NewStore(filepath.Join(t.TempDir(), "access.json"))
+	parent, err := s.Put(Update{Site: "demo", Mode: "ip_and_password", Networks: []string{"192.0.2.0/24"}, Credentials: []Credential{{Username: "reader", Password: "parent secret"}}, Rate: Rate{RequestsPerSecond: 3, Burst: 9}, DenialStatus: 404})
+	if err != nil {
+		t.Fatal(err)
+	}
+	inherited, err := s.Get("demo", "feature-a")
+	if err != nil || !inherited.Inherited || inherited.Revision != 0 || inherited.ParentRevision != parent.Revision || inherited.Mode != "ip_and_password" || inherited.DenialStatus != 404 || len(inherited.Users) != 1 || inherited.Users[0].Username != "reader" {
+		t.Fatalf("inherited policy: %+v, %v", inherited, err)
+	}
+
+	parentRevision := inherited.ParentRevision
+	branch, err := s.Put(Update{Site: "demo", Branch: "feature-a", ParentRevision: &parentRevision, Revision: inherited.Revision, Mode: "ip", Networks: []string{"198.51.100.0/24"}, Rate: Rate{RequestsPerSecond: 2, Burst: 4}})
+	if err != nil || branch.Inherited || branch.Revision != 1 || branch.ParentRevision != parent.Revision || branch.Mode != "ip" || len(branch.Users) != 1 {
+		t.Fatalf("branch override: %+v, %v", branch, err)
+	}
+
+	parent, err = s.Put(Update{Site: "demo", Revision: parent.Revision, Mode: "public", Rate: Rate{Burst: 60}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	branch, err = s.Get("demo", "feature-a")
+	if err != nil || branch.Inherited || branch.ParentRevision != parent.Revision || branch.Mode != "ip" || len(branch.Networks) != 1 || branch.Networks[0] != "198.51.100.0/24" || len(branch.Users) != 1 {
+		t.Fatalf("parent edit changed override: %+v, %v", branch, err)
+	}
+}
+
+func TestWorktreeResetInheritsCurrentParentAndKeepsCASGeneration(t *testing.T) {
+	s := NewStore(filepath.Join(t.TempDir(), "access.json"))
+	parent, err := s.Put(Update{Site: "demo", Mode: "ip", Networks: []string{"192.0.2.0/24"}, Rate: Rate{RequestsPerSecond: 1, Burst: 3}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parentRevision := parent.Revision
+	branch, err := s.Put(Update{Site: "demo", Branch: "feature-a", ParentRevision: &parentRevision, Mode: "public", Rate: Rate{Burst: 60}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	staleInheritedRevision := uint64(0)
+	parent, err = s.Put(Update{Site: "demo", Revision: parent.Revision, Mode: "password", Credentials: []Credential{{Username: "owner", Password: "new parent secret"}}, Rate: Rate{Burst: 60}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parentRevision = parent.Revision
+	reset, err := s.Put(Update{Site: "demo", Branch: "feature-a", Inherit: true, Revision: branch.Revision, ParentRevision: &parentRevision})
+	if err != nil || !reset.Inherited || reset.Mode != "password" || reset.Revision != branch.Revision+1 || reset.ParentRevision != parent.Revision || len(reset.Users) != 1 || reset.Users[0].Username != "owner" {
+		t.Fatalf("reset result: %+v, %v", reset, err)
+	}
+	if _, err = s.Put(Update{Site: "demo", Branch: "feature-a", Revision: staleInheritedRevision, ParentRevision: &parentRevision, Mode: "public", Rate: Rate{Burst: 60}}); err != ErrConflict {
+		t.Fatalf("pre-reset inherited editor did not conflict: %v", err)
+	}
+	d, err := s.read()
+	if err != nil || !d.Policies[key("demo", "feature-a")].Inherited || len(d.Policies[key("demo", "feature-a")].Hashes) != 0 {
+		t.Fatalf("missing safe inheritance marker: %+v, %v", d.Policies[key("demo", "feature-a")], err)
+	}
+}
+
+func TestWorktreeParentRevisionConflictDoesNotCreateOverride(t *testing.T) {
+	s := NewStore(filepath.Join(t.TempDir(), "access.json"))
+	parent, err := s.Put(Update{Site: "demo", Mode: "closed", Rate: Rate{Burst: 60}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	inherited, _ := s.Get("demo", "feature-a")
+	parent, err = s.Put(Update{Site: "demo", Revision: parent.Revision, Mode: "public", Rate: Rate{Burst: 60}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldParentRevision := inherited.ParentRevision
+	if _, err = s.Put(Update{Site: "demo", Branch: "feature-a", Revision: inherited.Revision, ParentRevision: &oldParentRevision, Mode: "public", Rate: Rate{Burst: 60}}); err != ErrConflict {
+		t.Fatalf("stale parent revision accepted: %v", err)
+	}
+	branch, err := s.Get("demo", "feature-a")
+	if err != nil || !branch.Inherited || branch.Mode != "public" || branch.ParentRevision != parent.Revision {
+		t.Fatalf("stale write changed inherited branch: %+v, %v", branch, err)
+	}
+}
+
+func TestClosedParentInheritsClosedAndDoesNotReachHandler(t *testing.T) {
+	s := NewStore(filepath.Join(t.TempDir(), "access.json"))
+	policy, err := s.Get("demo", "feature-a")
+	if err != nil || !policy.Inherited || policy.Mode != "closed" || policy.ParentRevision != 0 {
+		t.Fatalf("closed default: %+v, %v", policy, err)
+	}
+	h := s.Middleware("demo", "feature-a", func() ([]string, error) { return nil, nil }, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { t.Fatal("closed inherited share reached handler") }))
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest("GET", "http://demo.example/", nil))
+	if w.Code != 403 {
+		t.Fatal(w.Code)
+	}
+}
+
+func TestInheritedLegacyBcryptCredentialWorksInWorktree(t *testing.T) {
+	s := NewStore(filepath.Join(t.TempDir(), "access.json"))
+	hash, err := bcrypt.GenerateFromPassword([]byte("legacy parent password"), bcrypt.MinCost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := defaultPolicy("demo", "")
+	p.Mode = "password"
+	p.Revision = 1
+	p.Users = []User{{Username: "reader"}}
+	d := document{Version: 1, Policies: map[string]record{key("demo", ""): {Policy: p, Hashes: map[string]string{"reader": string(hash)}}}}
+	data, _ := json.Marshal(d)
+	if err = os.WriteFile(s.path, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	h := s.Middleware("demo", "feature-a", func() ([]string, error) { return nil, nil }, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) }))
+	r := httptest.NewRequest("GET", "http://demo.example/", nil)
+	r.RemoteAddr = "192.0.2.4:123"
+	r.SetBasicAuth("reader", "legacy parent password")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != 204 {
+		t.Fatal(w.Code)
+	}
+}
+
+func TestInheritedRateLimitIsAppliedPerWorktree(t *testing.T) {
+	s := NewStore(filepath.Join(t.TempDir(), "access.json"))
+	if _, err := s.Put(Update{Site: "demo", Mode: "public", Rate: Rate{RequestsPerSecond: 0.001, Burst: 1}}); err != nil {
+		t.Fatal(err)
+	}
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) })
+	main := s.Middleware("demo", "", func() ([]string, error) { return nil, nil }, next)
+	branch := s.Middleware("demo", "feature-a", func() ([]string, error) { return nil, nil }, next)
+	call := func(h http.Handler) int {
+		r := httptest.NewRequest("GET", "http://demo.example/", nil)
+		r.RemoteAddr = "192.0.2.1:123"
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w.Code
+	}
+	if got := call(main); got != 204 {
+		t.Fatal("first parent request", got)
+	}
+	if got := call(main); got != 429 {
+		t.Fatal("parent quota was not enforced", got)
+	}
+	if got := call(branch); got != 204 {
+		t.Fatal("branch did not inherit policy with an independent bucket", got)
+	}
+	if got := call(branch); got != 429 {
+		t.Fatal("branch quota was not enforced", got)
 	}
 }
